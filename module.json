@@ -1,0 +1,34 @@
+{
+  "id": "character-show",
+  "title": "Character Show",
+  "description": "A system-agnostic Foundry VTT overlay for arranging conversation portraits on screen.",
+  "version": "0.2.1",
+  "compatibility": {
+    "minimum": "13",
+    "verified": "14"
+  },
+  "authors": [
+    {
+      "name": "Joaokaralkovas"
+    }
+  ],
+  "languages": [
+    {
+      "lang": "en",
+      "name": "English",
+      "path": "lang/en.json"
+    },
+    {
+      "lang": "pt-BR",
+      "name": "Português (Brasil)",
+      "path": "lang/pt-BR.json"
+    }
+  ],
+  "esmodules": [
+    "src/main.mjs"
+  ],
+  "styles": [
+    "styles/module.css"
+  ],
+  "socket": true
+}

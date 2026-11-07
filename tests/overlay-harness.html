@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Character Show Overlay Harness</title>
+    <link rel="stylesheet" href="/modules/character-show/styles/module.css">
+    <style>
+      body {
+        background: #1f252b;
+        color: #f6f1e5;
+        font-family: system-ui, sans-serif;
+        height: 100vh;
+        margin: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <script type="module">
+      globalThis.game = {
+        i18n: {
+          localize: (key) => ({
+            "CHARACTER_SHOW.controls.clear": "Clear",
+            "CHARACTER_SHOW.controls.clearSelection": "Deselect",
+            "CHARACTER_SHOW.controls.close": "Close",
+            "CHARACTER_SHOW.controls.arrange": "Arrange",
+            "CHARACTER_SHOW.controls.arrangeColumn": "Column",
+            "CHARACTER_SHOW.controls.arrangeGrid": "2x2 grid",
+            "CHARACTER_SHOW.controls.arrangeRow": "Side by side",
+            "CHARACTER_SHOW.controls.collapseToolbar": "Collapse",
+            "CHARACTER_SHOW.controls.deselectActor": "Deselect actor",
+            "CHARACTER_SHOW.controls.expandToolbar": "Expand",
+            "CHARACTER_SHOW.controls.flip": "Flip portrait",
+            "CHARACTER_SHOW.controls.minimizeAll": "Minimize",
+            "CHARACTER_SHOW.controls.normalizeSizes": "Equalize",
+            "CHARACTER_SHOW.controls.namesOff": "Hide names",
+            "CHARACTER_SHOW.controls.namesOn": "Show names",
+            "CHARACTER_SHOW.controls.resize": "Resize",
+            "CHARACTER_SHOW.controls.resizeDown": "Shrink this actor",
+            "CHARACTER_SHOW.controls.resizeUp": "Grow this actor",
+            "CHARACTER_SHOW.controls.resizeAllDown": "Shrink",
+            "CHARACTER_SHOW.controls.resizeAllUp": "Grow",
+            "CHARACTER_SHOW.controls.resizeSelectionDown": "Shrink sel.",
+            "CHARACTER_SHOW.controls.resizeSelectionUp": "Grow sel.",
+            "CHARACTER_SHOW.controls.remove": "Remove actor",
+            "CHARACTER_SHOW.controls.resetCard": "Reset local portrait",
+            "CHARACTER_SHOW.controls.restoreAll": "Restore all",
+            "CHARACTER_SHOW.controls.selectActor": "Select actor",
+            "CHARACTER_SHOW.controls.selectedCount": "{count} selected",
+            "CHARACTER_SHOW.controls.snapToGrid": "Snap",
+            "CHARACTER_SHOW.controls.toggleName": "Toggle name",
+            "CHARACTER_SHOW.notifications.localMovementDisabled": "The GM has disabled local portrait adjustments.",
+            "CHARACTER_SHOW.notifications.resizeBlocked": "Cannot resize without overlapping portraits.",
+            "CHARACTER_SHOW.notifications.speakerNotOwned": "You can only mark an actor you own as speaking.",
+            "CHARACTER_SHOW.ui.dropActor": "Drop actor here",
+            "CHARACTER_SHOW.ui.empty": "Drag actors from the Actors sidebar onto the screen to start the conversation.",
+            "CHARACTER_SHOW.ui.speaker": "Speaking",
+            "CHARACTER_SHOW.ui.stage": "Character Show"
+          }[key] || key),
+          format: (key, data) => ({
+            "CHARACTER_SHOW.controls.selectedCount": `${data.count} selected`
+          }[key] || key)
+        },
+        modules: new Map([["character-show", { api: {} }]]),
+        user: { isGM: true }
+      };
+      globalThis.ui = { notifications: { warn: () => {} } };
+
+      const { CharacterShowOverlay } = await import("/modules/character-show/src/overlay.mjs");
+      const { markStageLayoutChanged, upsertParticipant } = await import("/modules/character-show/src/state.mjs");
+
+      class HarnessStore {
+        constructor() {
+          this.listeners = new Set();
+          this.stage = {
+            version: 1,
+            collapsed: false,
+            showNames: true,
+            speakerId: "Actor.alpha",
+            participants: [
+              { id: "Actor.alpha", uuid: "Actor.alpha", name: "Alpha", image: "icons/svg/mystery-man.svg", showName: true, flipped: false, x: 12, y: 22, size: 180, z: 11 },
+              { id: "Actor.beta", uuid: "Actor.beta", name: "Beta", image: "icons/svg/mystery-man.svg", showName: false, flipped: false, x: 36, y: 74, size: 180, z: 12 },
+              { id: "Actor.gamma", uuid: "Actor.gamma", name: "Gamma", image: "icons/svg/mystery-man.svg", showName: true, flipped: false, x: 60, y: 34, size: 180, z: 13 }
+            ]
+          };
+          this.local = { version: 1, hidden: false, offset: { x: 0, y: 0 }, participants: {}, localSpeakerId: null };
+          this.showControls = true;
+          this.allowPlayerLocalMovement = true;
+          this.allowPlayerOwnedSpeaker = true;
+          this.syncOrganization = true;
+          this.imageFraming = "portrait";
+        }
+        onChange(listener) {
+          this.listeners.add(listener);
+          return () => this.listeners.delete(listener);
+        }
+        async setStage(state) {
+          this.stage = state;
+          this.listeners.forEach((listener) => listener());
+        }
+        async setLocal(state) {
+          this.local = state;
+          this.listeners.forEach((listener) => listener());
+        }
+      }
+
+      const overlay = new CharacterShowOverlay(new HarnessStore());
+      overlay.mount();
+      globalThis.characterShowHarness = { overlay, store: overlay.store };
+      game.modules.get("character-show").api.addDroppedDocument = async (dropData, placement) => {
+        const id = dropData.uuid || (dropData.id ? `Actor.${dropData.id}` : "Actor.drop-test");
+        overlay.store.stage = markStageLayoutChanged(upsertParticipant(overlay.store.stage, {
+          id,
+          uuid: id,
+          name: dropData.name || "Dropped",
+          image: dropData.image || "icons/svg/mystery-man.svg",
+          showName: overlay.store.stage.showNames !== false,
+          ...placement
+        }));
+        overlay.store.listeners.forEach((listener) => listener());
+      };
+      document.body.dataset.ready = "true";
+    </script>
+  </body>
+</html>

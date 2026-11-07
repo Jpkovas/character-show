@@ -1,0 +1,7 @@
+.DS_Store
+.claude/
+/codex-scripts/
+/dist/
+/node_modules/
+/improvements.md
+/docs/
