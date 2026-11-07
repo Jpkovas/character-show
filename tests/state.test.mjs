@@ -207,3 +207,14 @@ test("speaker sync clears a local speaker that is no longer on stage", () => {
   assert.equal(synced.syncedSpeakerRevision, stage.speakerRevision);
   assert.equal(synced.localSpeakerId, null);
 });
+
+test("normalizeStageState drops malformed participants and a speaker that is not on stage", () => {
+  const state = normalizeStageState({
+    participants: [null, {}, { id: "" }, { id: 5 }, { id: "Actor.a", x: "bad" }],
+    speakerId: "Actor.gone"
+  });
+
+  assert.equal(state.participants.length, 1);
+  assert.equal(state.participants[0].x, 0);
+  assert.equal(state.speakerId, null);
+});

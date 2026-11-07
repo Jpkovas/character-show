@@ -1,27 +1,15 @@
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
-import playwright from "/Users/joaokaralkovas/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright/index.js";
+import { chromium } from "playwright";
+import { HARNESS_PATH, startHarnessServer } from "./serve-overlay-harness.mjs";
 
-const { chromium } = playwright;
-const localChrome = "/Users/joaokaralkovas/.cache/hyperframes/chrome/chrome-headless-shell/mac_arm-131.0.6778.85/chrome-headless-shell-mac-arm64/chrome-headless-shell";
-
-let browser;
-try {
-  browser = await chromium.launch({
-    headless: true,
-    ...(existsSync(localChrome) ? { executablePath: localChrome } : {})
-  });
-} catch (error) {
-  if (String(error.message || error).includes("Executable doesn't exist")) {
-    console.log("overlay-smoke skipped: Playwright browser executable is not installed.");
-    process.exit(0);
-  }
-  throw error;
-}
+const server = await startHarnessServer();
+const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
+const pageErrors = [];
+page.on("pageerror", (error) => pageErrors.push(error));
 
 try {
-  await page.goto("http://127.0.0.1:30000/modules/character-show/tests/overlay-harness.html", {
+  await page.goto(`http://127.0.0.1:${server.address().port}${HARNESS_PATH}`, {
     waitUntil: "networkidle"
   });
   await page.waitForSelector("body[data-ready='true']");
@@ -198,7 +186,7 @@ try {
   });
   await page.evaluate(() => {
     const dataTransfer = new DataTransfer();
-    dataTransfer.setData("application/json", JSON.stringify({ type: "Actor", id: "delta", name: "Delta" }));
+    dataTransfer.setData("application/json", JSON.stringify({ type: "Actor", id: "delta", name: "Payload name" }));
     document.dispatchEvent(new DragEvent("drop", {
       bubbles: true,
       cancelable: true,
@@ -211,6 +199,11 @@ try {
     return globalThis.characterShowHarness.store.stage.participants.some((entry) => entry.id === "Actor.delta");
   });
   assert.equal(await cardsOverlap(page, "Actor.alpha", "Actor.delta"), false, "dropping a new actor over an existing portrait should place it beside the blocker");
+  assert.equal(
+    await page.evaluate(() => globalThis.characterShowHarness.store.stage.participants.find((entry) => entry.id === "Actor.delta")?.name),
+    "Delta",
+    "a dropped actor is resolved through Foundry, not taken from the drop payload"
+  );
 
   await resetHarnessState(page, {
     participants: [
@@ -406,7 +399,7 @@ try {
 
   await page.evaluate(() => {
     const store = globalThis.characterShowHarness.store;
-    store.stage = {
+    const nextStage = {
       version: 1,
       collapsed: false,
       showNames: true,
@@ -419,9 +412,7 @@ try {
         { id: "Actor.gamma", uuid: "Actor.gamma", name: "Gamma", image: "icons/svg/mystery-man.svg", showName: true, flipped: false, x: 42, y: 64, size: 180, z: 13 }
       ]
     };
-    globalThis.characterShowHarness.overlay._lastRenderedPositions = new Map();
-    globalThis.characterShowHarness.overlay._lastRenderedSizes = new Map();
-    store.listeners.forEach((listener) => listener());
+    return globalThis.characterShowHarness.write("globalState", nextStage);
   });
   await page.waitForTimeout(450);
 
@@ -459,7 +450,7 @@ try {
 
   await page.evaluate(() => {
     const store = globalThis.characterShowHarness.store;
-    store.stage = {
+    const nextStage = {
       ...store.stage,
       participants: [
         { id: "Actor.alpha", uuid: "Actor.alpha", name: "Alpha", image: "icons/svg/mystery-man.svg", showName: true, flipped: false, x: 10, y: 10, size: 150, z: 11 },
@@ -467,9 +458,7 @@ try {
         { id: "Actor.gamma", uuid: "Actor.gamma", name: "Gamma", image: "icons/svg/mystery-man.svg", showName: true, flipped: false, x: 74, y: 10, size: 150, z: 13 }
       ]
     };
-    globalThis.characterShowHarness.overlay._lastRenderedPositions = new Map();
-    globalThis.characterShowHarness.overlay._lastRenderedSizes = new Map();
-    store.listeners.forEach((listener) => listener());
+    return globalThis.characterShowHarness.write("globalState", nextStage);
   });
   await page.waitForTimeout(180);
   const noOverlapBeforeReveal = await participantY(page, "Actor.gamma");
@@ -480,7 +469,7 @@ try {
 
   await page.evaluate(() => {
     const store = globalThis.characterShowHarness.store;
-    store.stage = {
+    const nextStage = {
       ...store.stage,
       participants: store.stage.participants.map((entry, index) => ({
         ...entry,
@@ -488,9 +477,7 @@ try {
         y: [6, 37, 64][index]
       }))
     };
-    globalThis.characterShowHarness.overlay._lastRenderedPositions = new Map();
-    globalThis.characterShowHarness.overlay._lastRenderedSizes = new Map();
-    store.listeners.forEach((listener) => listener());
+    return globalThis.characterShowHarness.write("globalState", nextStage);
   });
   await page.waitForTimeout(450);
   await toggleName(page, "Actor.gamma");
@@ -498,9 +485,9 @@ try {
   const lowerAfterHide = await participantY(page, "Actor.gamma");
   assert.ok(Math.abs(lowerAfterHide - 64) < 0.5, "hiding the lower name should not pull it toward the middle actor");
 
-  const squareGridSnap = await page.evaluate(() => {
+  const squareGridSnap = await page.evaluate(async () => {
     const store = globalThis.characterShowHarness.store;
-    store.local = { ...store.local, snapToGrid: true };
+    await globalThis.characterShowHarness.write("localState", { ...store.local, snapToGrid: true });
     const snapped = globalThis.characterShowHarness.overlay.applySnapToPosition({ x: 17.3, y: 17.3 });
     return {
       xPixels: (snapped.x / 100) * window.innerWidth,
@@ -556,8 +543,7 @@ try {
   await resetHarnessState(page);
   await page.evaluate(() => {
     const store = globalThis.characterShowHarness.store;
-    store.local = { ...store.local, snapToGrid: true };
-    store.listeners.forEach((listener) => listener());
+    return globalThis.characterShowHarness.write("localState", { ...store.local, snapToGrid: true });
   });
   await page.waitForTimeout(120);
   await selectParticipant(page, "Actor.alpha");
@@ -653,7 +639,7 @@ try {
 
   await page.evaluate(() => {
     const wrapper = document.createElement("div");
-    wrapper.id = "controls";
+    wrapper.id = "scene-controls";
     Object.assign(wrapper.style, {
       position: "fixed",
       top: "0",
@@ -700,8 +686,7 @@ try {
 
   await page.evaluate(() => {
     const store = globalThis.characterShowHarness.store;
-    store.local = { ...store.local, snapToGrid: true };
-    store.listeners.forEach((listener) => listener());
+    return globalThis.characterShowHarness.write("localState", { ...store.local, snapToGrid: true });
   });
   await page.waitForTimeout(520);
   const gridInsetRect = await page.locator("[data-participant-id='Actor.gamma']").boundingBox();
@@ -722,7 +707,7 @@ try {
 
   await page.evaluate(() => {
     document.getElementById("sidebar")?.remove();
-    document.getElementById("controls")?.remove();
+    document.getElementById("scene-controls")?.remove();
   });
 
   await resetHarnessState(page, {
@@ -801,8 +786,7 @@ try {
   });
   await page.evaluate(() => {
     const store = globalThis.characterShowHarness.store;
-    store.local = { ...store.local, selectedParticipantIds: ["Actor.alpha", "Actor.beta", "Actor.gamma"] };
-    store.listeners.forEach((listener) => listener());
+    return globalThis.characterShowHarness.write("localState", { ...store.local, selectedParticipantIds: ["Actor.alpha", "Actor.beta", "Actor.gamma"] });
   });
   await page.waitForTimeout(160);
   await page.getByRole("button", { name: "Grow sel." }).click();
@@ -888,8 +872,142 @@ try {
   assert.equal(ultrawideStored["Actor.beta"], 38, "stage-space rendering must not rewrite the shared layout");
   await page.setViewportSize({ width: 1920, height: 1080 });
   await page.waitForTimeout(820);
+  // A second pointer never moves or drops a running drag, and a cancelled pointer (touch scroll, alert, lost focus)
+  // ends the drag without committing it and puts the portrait back.
+  await resetHarnessState(page);
+  const gammaBox = await page.locator("[data-participant-id='Actor.gamma'] .character-show-card-image").boundingBox();
+  const gammaBefore = (await stagePositions(page, ["Actor.gamma"]))["Actor.gamma"];
+  const gammaCardBefore = await page.locator("[data-participant-id='Actor.gamma']").boundingBox();
+  const cancelledCardDrag = await page.evaluate(({ x, y }) => {
+    const card = () => document.querySelector("[data-participant-id='Actor.gamma']");
+    const pointer = (type, target, dx, pointerId = 1) => target.dispatchEvent(new PointerEvent(type, {
+      bubbles: true, cancelable: true, pointerId, button: 0, clientX: x + dx, clientY: y + dx
+    }));
+    pointer("pointerdown", card().querySelector(".character-show-card-image"), 0);
+    pointer("pointermove", document, 80);
+    const leftWhileDragging = card().style.left;
+    pointer("pointermove", document, 300, 2);
+    pointer("pointerup", document, 300, 2);
+    const otherPointer = {
+      stillDragging: card().classList.contains("is-dragging"),
+      notMoved: card().style.left === leftWhileDragging
+    };
+    pointer("pointercancel", document, 80);
+    return { otherPointer, dragging: document.querySelectorAll(".character-show-card.is-dragging").length };
+  }, { x: gammaBox.x + gammaBox.width / 2, y: gammaBox.y + gammaBox.height / 2 });
+  await page.waitForTimeout(700); // the portrait glides back (FLIP settles in about 420 ms)
+  assert.deepEqual(cancelledCardDrag.otherPointer, { stillDragging: true, notMoved: true }, "another pointer must not move or drop a running drag");
+  assert.equal(cancelledCardDrag.dragging, 0, "a cancelled card drag should drop its dragging state");
+  assert.deepEqual((await stagePositions(page, ["Actor.gamma"]))["Actor.gamma"], gammaBefore, "a cancelled card drag must not move the portrait");
+  const gammaCardAfter = await page.locator("[data-participant-id='Actor.gamma']").boundingBox();
+  assert.ok(Math.abs(gammaCardAfter.x - gammaCardBefore.x) < 1 && Math.abs(gammaCardAfter.y - gammaCardBefore.y) < 1, "a cancelled card drag should put the portrait back on screen");
+
+  const controlsBox = await page.locator("[data-controls]").boundingBox();
+  const cancelledToolbarDrag = await page.evaluate(({ x, y }) => {
+    const controls = document.querySelector("[data-controls]");
+    const root = document.getElementById("character-show-overlay");
+    const before = globalThis.characterShowHarness.store.local.controlsPosition;
+    const pointer = (type, target, dx) => target.dispatchEvent(new PointerEvent(type, {
+      bubbles: true, cancelable: true, pointerId: 1, button: 0, clientX: x + dx, clientY: y + dx
+    }));
+    pointer("pointerdown", controls, 0);
+    pointer("pointermove", document, 60);
+    const draggingBeforeBlur = root.classList.contains("is-toolbar-dragging");
+    window.dispatchEvent(new Event("blur"));
+    const draggingAfterBlur = root.classList.contains("is-toolbar-dragging");
+    pointer("pointerup", document, 120);
+    return {
+      draggingBeforeBlur,
+      draggingAfterBlur,
+      unchanged: globalThis.characterShowHarness.store.local.controlsPosition === before
+    };
+  }, { x: controlsBox.x + 6, y: controlsBox.y + controlsBox.height / 2 });
+  assert.deepEqual(cancelledToolbarDrag, { draggingBeforeBlur: true, draggingAfterBlur: false, unchanged: true }, "losing focus mid toolbar drag should cancel it");
+  await page.waitForTimeout(300);
+  const controlsAfter = await page.locator("[data-controls]").boundingBox();
+  assert.ok(Math.abs(controlsAfter.x - controlsBox.x) < 1 && Math.abs(controlsAfter.y - controlsBox.y) < 1, "a cancelled toolbar drag should put the toolbar back");
+
+  // Adding an actor renders once (no nested render from the local sync) and the new card animates in.
+  await resetHarnessState(page);
+  const addRender = await page.evaluate(async () => {
+    const { overlay, store } = globalThis.characterShowHarness;
+    const renderControls = overlay.renderControls;
+    let renders = 0;
+    overlay.renderControls = function (...args) {
+      renders += 1;
+      return renderControls.apply(this, args);
+    };
+    try {
+      await game.modules.get("character-show").api.addActor(game.actors.get("delta"));
+    } finally {
+      overlay.renderControls = renderControls;
+    }
+    return {
+      renders,
+      entering: document.querySelector("[data-participant-id='Actor.delta']")?.classList.contains("is-entering") ?? false,
+      synced: store.local.syncedLayoutRevision === store.stage.layoutRevision
+    };
+  });
+  assert.deepEqual(addRender, { renders: 1, entering: true, synced: true }, "adding an actor should render once and animate the new card");
+
+  // Any drop ends the drag hint, including text and non-actor documents, which add nothing.
+  await resetHarnessState(page);
+  const foreignDrops = await page.evaluate(() => {
+    const root = document.getElementById("character-show-overlay");
+    const box = root.querySelector("[data-drop-target]").getBoundingClientRect();
+    const at = { clientX: box.left + box.width / 2, clientY: box.top + box.height / 2 };
+    const results = [];
+    for (const payload of ["hello", JSON.stringify({ type: "Item", uuid: "Item.x" })]) {
+      const dataTransfer = new DataTransfer();
+      dataTransfer.setData("text/plain", payload);
+      document.dispatchEvent(new DragEvent("dragover", { bubbles: true, cancelable: true, dataTransfer, ...at }));
+      const shown = root.classList.contains("is-drop-target");
+      document.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer, ...at }));
+      results.push({ shown, cleared: !root.classList.contains("is-drop-target") && !root.classList.contains("is-drop-target-active") });
+    }
+    return { results, cards: globalThis.characterShowHarness.store.stage.participants.length };
+  });
+  assert.deepEqual(foreignDrops.results, [{ shown: true, cleared: true }, { shown: false, cleared: true }], "a foreign drop should clear the drop hint");
+  assert.equal(foreignDrops.cards, 3, "a foreign drop should add nothing");
+
+  // With Foundry's light theme the panels stay dark, so their text must not follow the theme's dark text color.
+  const themeText = await page.evaluate(() => {
+    const style = document.createElement("style");
+    style.textContent = "body { --color-text-primary: #efe6d8; --color-text-secondary: #d0c8b8; } body.theme-light { --color-text-primary: #222222; --color-text-secondary: #333333; }";
+    document.head.append(style);
+    const name = document.querySelector(".character-show-name");
+    const read = () => getComputedStyle(name).color;
+    const dark = read();
+    document.body.classList.add("theme-light");
+    const light = read();
+    document.body.classList.remove("theme-light");
+    style.remove();
+    return { dark, light };
+  });
+  assert.equal(themeText.light, themeText.dark, "overlay text on the dark panels must not change with Foundry's light theme");
+
+  // A player can only mark an actor they own as speaking.
+  await resetHarnessState(page);
+  const playerSpeaker = await page.evaluate(async () => {
+    const { store, notices } = globalThis.characterShowHarness;
+    notices.length = 0;
+    game.user.isGM = false;
+    try {
+      document.querySelector("[data-participant-id='Actor.gamma'] [data-action='speaker']").click();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      const denied = { warned: notices.includes("You can only mark an actor you own as speaking."), local: store.local.localSpeakerId };
+      document.querySelector("[data-participant-id='Actor.beta'] [data-action='speaker']").click();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      return { denied, allowed: store.local.localSpeakerId, shared: store.stage.speakerId };
+    } finally {
+      game.user.isGM = true;
+    }
+  });
+  assert.deepEqual(playerSpeaker, { denied: { warned: true, local: null }, allowed: "Actor.beta", shared: "Actor.alpha" }, "players may only mark owned actors as speaking, locally");
+  assert.deepEqual(pageErrors.map(String), [], "the overlay should run without page errors");
 } finally {
   await browser.close();
+  server.close();
 }
 
 async function assertVisibleText(page, text) {
@@ -1078,10 +1196,11 @@ async function stagePositions(page, ids) {
 }
 
 async function resetHarnessState(page, options = {}) {
-  await page.evaluate((resetOptions) => {
+  await page.evaluate(async (resetOptions) => {
     const store = globalThis.characterShowHarness.store;
-    store.syncOrganization = resetOptions.syncOrganization ?? true;
-    store.stage = {
+    const harness = globalThis.characterShowHarness;
+    await harness.write("syncOrganization", resetOptions.syncOrganization ?? true);
+    const nextStage = {
       version: 1,
       collapsed: false,
       showNames: true,
@@ -1094,7 +1213,7 @@ async function resetHarnessState(page, options = {}) {
         { id: "Actor.gamma", uuid: "Actor.gamma", name: "Gamma", image: "icons/svg/mystery-man.svg", showName: true, flipped: false, x: 60, y: 34, size: 180, z: 13 }
       ]
     };
-    store.local = {
+    const nextLocal = {
       version: 1,
       syncedLayoutRevision: 0,
       syncedSpeakerRevision: 0,
@@ -1109,9 +1228,8 @@ async function resetHarnessState(page, options = {}) {
       selectedParticipantIds: [],
       localSpeakerId: null
     };
-    globalThis.characterShowHarness.overlay._lastRenderedPositions = new Map();
-    globalThis.characterShowHarness.overlay._lastRenderedSizes = new Map();
-    store.listeners.forEach((listener) => listener());
+    await harness.write("localState", nextLocal);
+    await harness.write("globalState", nextStage);
   }, options);
   await page.waitForTimeout(560);
 }

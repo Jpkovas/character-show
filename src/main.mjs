@@ -3,8 +3,8 @@ import { CharacterShowOverlay, debugFoundryUiBlockers } from "./overlay.mjs";
 import { CharacterShowStore } from "./settings.mjs";
 import { markStageLayoutChanged, markStageSpeakerChanged, normalizeParticipantSizes, removeParticipant, resizeParticipantSizes, upsertParticipant, updateParticipant } from "./state.mjs";
 
-let store;
-let overlay;
+export let store;
+export let overlay;
 
 Hooks.once("init", () => {
   store = new CharacterShowStore();
@@ -12,7 +12,6 @@ Hooks.once("init", () => {
 });
 
 Hooks.once("ready", () => {
-  store.registerSocket();
   overlay = new CharacterShowOverlay(store);
   overlay.mount();
   registerPublicApi();

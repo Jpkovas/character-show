@@ -8,9 +8,9 @@
   --character-show-control-hover: var(--button-hover-background-color, color-mix(in srgb, var(--character-show-accent) 28%, var(--character-show-control)));
   --character-show-control-active: var(--toggle-active-bg-color, color-mix(in srgb, var(--character-show-accent) 24%, var(--character-show-control)));
   --character-show-control-border-active: var(--toggle-active-border-color, var(--control-active-border-color, var(--character-show-accent)));
-  --character-show-text: var(--button-text-color, var(--color-text-primary, var(--color-text-light-highlight, #f6f1e5)));
+  --character-show-text: var(--button-text-color, var(--color-text-light-highlight, #f6f1e5));
   --character-show-icon: var(--character-show-accent);
-  --character-show-muted: var(--color-text-secondary, var(--color-text-light-6, #c8c0b0));
+  --character-show-muted: var(--color-text-light-6, #c8c0b0);
   --character-show-font: var(--font-primary, var(--font-body, var(--crlngn-font-family, inherit)));
   --character-show-radius-panel: var(--button-border-radius, var(--border-radius, var(--crlngn-border-radius, 10px)));
   --character-show-radius-control: var(--button-border-radius, var(--border-radius, var(--crlngn-border-radius, 7px)));
@@ -126,6 +126,7 @@
 }
 
 .character-show-controls {
+  touch-action: none;
   align-items: center;
   backdrop-filter: blur(12px);
   background: var(--character-show-panel-bg);
@@ -603,6 +604,7 @@
 }
 
 .character-show-card {
+  touch-action: none;
   --character-show-card-size: 190px;
   --character-show-image-ratio: 0.8;
   --character-show-shift-x: 0px;

@@ -1,0 +1,12 @@
+{
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/state.test.mjs",
+    "test:smoke": "node tests/overlay-smoke.mjs",
+    "harness": "node tests/serve-overlay-harness.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.56.1"
+  }
+}

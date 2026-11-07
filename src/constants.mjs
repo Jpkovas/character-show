@@ -1,7 +1,5 @@
 export const MODULE_ID = "character-show";
 
-export const SOCKET_REFRESH = "refresh";
-
 export const SETTINGS = {
   globalState: "globalState",
   localState: "localState",

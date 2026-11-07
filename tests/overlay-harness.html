@@ -61,63 +61,56 @@
             "CHARACTER_SHOW.controls.selectedCount": `${data.count} selected`
           }[key] || key)
         },
-        modules: new Map([["character-show", { api: {} }]]),
+        modules: new Map([["character-show", {}]]),
         user: { isGM: true }
       };
-      globalThis.ui = { notifications: { warn: () => {} } };
 
-      const { CharacterShowOverlay } = await import("/modules/character-show/src/overlay.mjs");
-      const { markStageLayoutChanged, upsertParticipant } = await import("/modules/character-show/src/state.mjs");
+      // Foundry stubs: settings call onChange synchronously on write, like client settings do in Foundry.
+      const settings = new Map();
+      game.settings = {
+        register: (namespace, key, config) => settings.set(key, { config, value: structuredClone(config.default) }),
+        get: (namespace, key) => structuredClone(settings.get(key).value),
+        set: async (namespace, key, value) => {
+          const entry = settings.get(key);
+          entry.value = structuredClone(value);
+          entry.config.onChange?.(entry.value);
+          return value;
+        }
+      };
+      const notices = [];
+      globalThis.ui = { notifications: { info: () => {}, warn: (message) => notices.push(message) } };
+      const actor = (id, name, owned = true) => ({
+        id, uuid: `Actor.${id}`, name, img: "icons/svg/mystery-man.svg", documentName: "Actor",
+        testUserPermission: () => owned
+      });
+      game.actors = new Map([
+        ["alpha", actor("alpha", "Alpha")], ["beta", actor("beta", "Beta")], ["gamma", actor("gamma", "Gamma", false)],
+        ["delta", actor("delta", "Delta")], ["drop-test", actor("drop-test", "Dropped")]
+      ]);
+      globalThis.fromUuid = async (uuid) => game.actors.get(String(uuid).replace(/^Actor\./, "")) ?? null;
+      globalThis.CONST = { DOCUMENT_OWNERSHIP_LEVELS: { OWNER: 3 } };
+      const hooks = {};
+      globalThis.Hooks = { once: (name, callback) => { hooks[name] = callback; } };
 
-      class HarnessStore {
-        constructor() {
-          this.listeners = new Set();
-          this.stage = {
-            version: 1,
-            collapsed: false,
-            showNames: true,
-            speakerId: "Actor.alpha",
-            participants: [
-              { id: "Actor.alpha", uuid: "Actor.alpha", name: "Alpha", image: "icons/svg/mystery-man.svg", showName: true, flipped: false, x: 12, y: 22, size: 180, z: 11 },
-              { id: "Actor.beta", uuid: "Actor.beta", name: "Beta", image: "icons/svg/mystery-man.svg", showName: false, flipped: false, x: 36, y: 74, size: 180, z: 12 },
-              { id: "Actor.gamma", uuid: "Actor.gamma", name: "Gamma", image: "icons/svg/mystery-man.svg", showName: true, flipped: false, x: 60, y: 34, size: 180, z: 13 }
-            ]
-          };
-          this.local = { version: 1, hidden: false, offset: { x: 0, y: 0 }, participants: {}, localSpeakerId: null };
-          this.showControls = true;
-          this.allowPlayerLocalMovement = true;
-          this.allowPlayerOwnedSpeaker = true;
-          this.syncOrganization = true;
-          this.imageFraming = "portrait";
-        }
-        onChange(listener) {
-          this.listeners.add(listener);
-          return () => this.listeners.delete(listener);
-        }
-        async setStage(state) {
-          this.stage = state;
-          this.listeners.forEach((listener) => listener());
-        }
-        async setLocal(state) {
-          this.local = state;
-          this.listeners.forEach((listener) => listener());
-        }
-      }
-
-      const overlay = new CharacterShowOverlay(new HarnessStore());
-      overlay.mount();
-      globalThis.characterShowHarness = { overlay, store: overlay.store };
-      game.modules.get("character-show").api.addDroppedDocument = async (dropData, placement) => {
-        const id = dropData.uuid || (dropData.id ? `Actor.${dropData.id}` : "Actor.drop-test");
-        overlay.store.stage = markStageLayoutChanged(upsertParticipant(overlay.store.stage, {
-          id,
-          uuid: id,
-          name: dropData.name || "Dropped",
-          image: dropData.image || "icons/svg/mystery-man.svg",
-          showName: overlay.store.stage.showNames !== false,
-          ...placement
-        }));
-        overlay.store.listeners.forEach((listener) => listener());
+      const main = await import("/modules/character-show/src/main.mjs");
+      hooks.init();
+      await game.settings.set("character-show", "globalState", {
+        version: 1,
+        collapsed: false,
+        showNames: true,
+        speakerId: "Actor.alpha",
+        participants: [
+          { id: "Actor.alpha", uuid: "Actor.alpha", name: "Alpha", image: "icons/svg/mystery-man.svg", showName: true, flipped: false, x: 12, y: 22, size: 180, z: 11 },
+          { id: "Actor.beta", uuid: "Actor.beta", name: "Beta", image: "icons/svg/mystery-man.svg", showName: false, flipped: false, x: 36, y: 74, size: 180, z: 12 },
+          { id: "Actor.gamma", uuid: "Actor.gamma", name: "Gamma", image: "icons/svg/mystery-man.svg", showName: true, flipped: false, x: 60, y: 34, size: 180, z: 13 }
+        ]
+      });
+      hooks.ready();
+      globalThis.characterShowHarness = {
+        overlay: main.overlay,
+        store: main.store,
+        notices,
+        write: (key, value) => game.settings.set("character-show", key, value)
       };
       document.body.dataset.ready = "true";
     </script>

@@ -16,9 +16,17 @@ Character Show is a system-agnostic Foundry VTT module for showing conversation 
 - Drag actors from the Actor Directory sidebar into the Foundry screen to add them as conversation portraits without creating scene tokens.
 - No emotion or pose system in the MVP.
 
+## Installation
+
+In Foundry, under *Add-on Modules → Install Module*, search for **Character Show** or paste the manifest URL:
+
+`https://github.com/Jpkovas/character-show/releases/latest/download/module.json`
+
+Then enable the module in your world. Foundry's update check picks up new versions.
+
 ## Compatibility
 
-- Foundry VTT: minimum 13, verified 14.
+- Foundry VTT: minimum 13, verified 14.370.
 - Game systems: all systems. The module reads standard Actor and TokenDocument portrait fields only.
 
 ## Usage
@@ -67,4 +75,20 @@ It also exposes module-specific override variables on `.character-show-overlay`:
 
 ## Notes
 
-Character Show intentionally avoids required dependencies such as libWrapper or socketlib. It uses Foundry settings plus the native module socket namespace for refresh notifications.
+Character Show intentionally avoids required dependencies such as libWrapper or socketlib. The shared stage is a world setting, and Foundry's own setting updates keep every client in sync.
+
+## Development
+
+- `npm test` runs the state unit tests.
+- `npm run test:smoke` runs the browser smoke test against `tests/overlay-harness.html`, which loads the real module with a stubbed Foundry `game`. It needs Playwright's Chromium (`npx playwright install chromium`).
+- `npm run harness` serves the harness for manual checks.
+
+## Publishing a new version
+
+1. Bump `version` in `module.json` and the `download` URL (it points to the `v<version>` tag), commit and push.
+2. Create a GitHub release with the tag `v<version>`.
+3. `.github/workflows/release.yml` checks the tag against `module.json`, builds `module.zip` and attaches `module.json` and `module.zip` to the release. With the `FOUNDRY_RELEASE_TOKEN` repository secret (from the package page on foundryvtt.com), it also registers the version in Foundry's package library.
+
+## License
+
+MIT.

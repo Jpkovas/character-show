@@ -1,4 +1,4 @@
-import { IMAGE_FRAMING, MODULE_ID, SETTINGS, SOCKET_REFRESH } from "./constants.mjs";
+import { IMAGE_FRAMING, MODULE_ID, SETTINGS } from "./constants.mjs";
 import { DEFAULT_LOCAL_STATE, DEFAULT_STAGE_STATE, normalizeLocalState, normalizeStageState } from "./state.mjs";
 
 export class CharacterShowStore {
@@ -82,12 +82,6 @@ export class CharacterShowStore {
     });
   }
 
-  registerSocket() {
-    game.socket?.on(`module.${MODULE_ID}`, (message) => {
-      if (message?.type === SOCKET_REFRESH) this.notify();
-    });
-  }
-
   get stage() {
     return normalizeStageState(game.settings.get(MODULE_ID, SETTINGS.globalState));
   }
@@ -118,8 +112,8 @@ export class CharacterShowStore {
   }
 
   async setStage(state) {
+    // A world setting change reaches every client through its onChange; no socket message is needed.
     await game.settings.set(MODULE_ID, SETTINGS.globalState, normalizeStageState(state));
-    game.socket?.emit(`module.${MODULE_ID}`, { type: SOCKET_REFRESH });
   }
 
   async setLocal(state) {

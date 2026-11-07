@@ -25,9 +25,7 @@ const STAGE_SCALE_MIN = 0.5;
 const STAGE_SCALE_MAX = 2;
 const FOUNDRY_UI_SELECTORS = [
   "#sidebar",
-  "#controls",
   "#scene-controls",
-  "#navigation",
   "#scene-navigation",
   "#hotbar",
   "#players"
@@ -102,7 +100,7 @@ export class CharacterShowOverlay {
   }
 
   render() {
-    if (!this.root) return;
+    if (!this.root || this._syncingLocal) return;
 
     const focusTarget = this.captureFocusTarget();
     const miniDockScrollLeft = this.root.querySelector("[data-mini-dock]")?.scrollLeft ?? null;
@@ -795,6 +793,7 @@ export class CharacterShowOverlay {
   }
 
   startCardDrag(event, card, id) {
+    if (!this.canStartDrag(event)) return;
     if (event.target.closest(".character-show-card-tools")) return;
     if (event.shiftKey) return;
     if (!this.canUserAdjustParticipant()) return;
@@ -830,11 +829,13 @@ export class CharacterShowOverlay {
       this.positionSelectionDockDuringDrag(dragItems, positions, viewport, dragMetrics);
     };
 
-    const onUp = async (upEvent) => {
-      document.removeEventListener("pointermove", onMove);
-      document.removeEventListener("pointerup", onUp);
+    const finish = () => {
       this.root?.classList.remove("is-grid-active");
       for (const item of dragItems) item.card.classList.remove("is-dragging");
+    };
+
+    const onUp = async (upEvent) => {
+      finish();
       const deltaX = upEvent.clientX - start.x;
       const deltaY = upEvent.clientY - start.y;
       const proposedPositions = this.resolveGroupDragPositions(dragItems, deltaX, deltaY, viewport, dragMetrics, id);
@@ -852,8 +853,14 @@ export class CharacterShowOverlay {
       await this.updateParticipantOrganizations(updates);
     };
 
-    document.addEventListener("pointermove", onMove);
-    document.addEventListener("pointerup", onUp, { once: true });
+    this.trackPointerDrag(event, {
+      move: onMove,
+      end: onUp,
+      cancel: () => {
+        finish();
+        this.render();
+      }
+    });
   }
 
   async resizeParticipant(id, delta) {
@@ -1268,7 +1275,13 @@ export class CharacterShowOverlay {
       localParticipants !== Object.keys(nextLocal.participants || {}).length ||
       selectionChanged
     ) {
-      this.store.setLocal(nextLocal);
+      // Client settings are written (and onChange fired) synchronously: keep this render from re-entering itself.
+      this._syncingLocal = true;
+      try {
+        this.store.setLocal(nextLocal).catch((error) => console.error(error));
+      } finally {
+        this._syncingLocal = false;
+      }
     }
     return nextLocal;
   }
@@ -1317,16 +1330,13 @@ export class CharacterShowOverlay {
   }
 
   async handleDocumentDrop(event) {
+    this.clearDropTargetState();
     const dropData = readFoundryDropData(event);
     if (!dropData || dropData.type !== "Actor") return;
-    if (!this.isPointerInDropTarget(event)) {
-      this.clearDropTargetState();
-      return;
-    }
+    if (!this.isPointerInDropTarget(event)) return;
 
     event.preventDefault();
     event.stopPropagation();
-    this.clearDropTargetState();
     const placement = this.resolveDroppedParticipantPlacement(dropData, this.applySnapToPosition(pointerToPercent(event)));
     await game.modules.get(MODULE_ID).api.addDroppedDocument(dropData, placement);
   }
@@ -1594,7 +1604,7 @@ export class CharacterShowOverlay {
     if (!controls) return;
 
     controls.addEventListener("pointerdown", (event) => {
-      if (event.target.closest("button")) return;
+      if (event.target.closest("button") || !this.canStartDrag(event)) return;
       event.preventDefault();
 
       const rect = controls.getBoundingClientRect();
@@ -1618,8 +1628,6 @@ export class CharacterShowOverlay {
       };
 
       const onUp = async (upEvent) => {
-        document.removeEventListener("pointermove", onMove);
-        document.removeEventListener("pointerup", onUp);
         this.root.classList.remove("is-toolbar-dragging");
         if (!moved) return;
         const proposed = {
@@ -1629,9 +1637,44 @@ export class CharacterShowOverlay {
         await this.store.setLocal({ ...this.store.local, controlsPosition: this.rejectOverlappingControls(rect, proposed, lastValid) });
       };
 
-      document.addEventListener("pointermove", onMove);
-      document.addEventListener("pointerup", onUp, { once: true });
+      this.trackPointerDrag(event, {
+        move: onMove,
+        end: onUp,
+        cancel: () => {
+          this.root.classList.remove("is-toolbar-dragging");
+          this.render();
+        }
+      });
     });
+  }
+
+  /**
+   * Follow one pointer from pointerdown until it is released or lost; only one drag runs at a time. Pointer cancel
+   * and window blur end the drag through `cancel` (nothing is committed); other pointers are ignored.
+   */
+  /** A second pointer cannot start a parallel drag. The same pointer going down again means its last drag lost its end. */
+  canStartDrag(event) {
+    if (!this.dragState) return true;
+    if (this.dragState.pointerId !== event.pointerId) return false;
+    this.dragState.cancel({});
+    return true;
+  }
+
+  trackPointerDrag(startEvent, { move, end, cancel }) {
+    const controller = new AbortController();
+    const options = { signal: controller.signal };
+    const samePointer = (event) => event.pointerId === startEvent.pointerId;
+    const stop = (callback) => (event) => {
+      if (event.pointerId !== undefined && !samePointer(event)) return;
+      controller.abort();
+      this.dragState = null;
+      callback(event);
+    };
+    this.dragState = { pointerId: startEvent.pointerId, cancel: stop(cancel) };
+    document.addEventListener("pointermove", (event) => { if (samePointer(event)) move(event); }, options);
+    document.addEventListener("pointerup", stop(end), options);
+    document.addEventListener("pointercancel", stop(cancel), options);
+    window.addEventListener("blur", stop(cancel), options);
   }
 
   rejectOverlappingControls(startRect, position, fallback) {
